@@ -1251,6 +1251,10 @@ script:
             id(control_leds_init_state).execute();
           } else if (!id(wifi_id).is_connected() || !id(va)->is_connected()) {
             id(control_leds_no_ha_connection_state).execute();
+          } else if (id(va)->is_meeting_recording()) {
+            // Privacy indicator has priority over button/dial/timer/assistant
+            // phases. Nothing may visually hide an active microphone capture.
+            id(control_leds_meeting_recording).execute();
           } else if (id(center_button).state) {
             id(control_leds_center_button_touched).execute();
           } else if (id(jack_plugged_recently)) {
