@@ -681,6 +681,16 @@ void VaClient::on_mic_data_(const std::vector<uint8_t> &samples) {
     return;
   }
 
+  // Half-duplex playback when barge-in is disabled. Sending microphone frames
+  // while receiving TTS makes both directions contend for the ESP websocket
+  // client's internal lock. On Voice PE this showed up as dropped mic frames,
+  // 200-450 ms incoming-audio gaps and badly stuttering/noisy replies. There is
+  // no reason to upload the mic during REPLYING when barge-in is off. Meeting
+  // recording is the exception: its continuous local capture must keep flowing.
+  if (static_cast<Phase>(this->current_phase_.load()) == Phase::REPLYING &&
+      !this->barge_in_ && !this->meeting_recording_)
+    return;
+
   auto handle = static_cast<esp_websocket_client_handle_t>(this->ws_handle_);
 
   // First frame of a fresh session: DISCARD the pre-roll instead of replaying
