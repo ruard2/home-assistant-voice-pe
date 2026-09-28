@@ -128,11 +128,16 @@ void VaClient::loop() {
         const bool resampler_cold = this->speaker_->is_stopped() ||
                                     this->last_fed_ms_ == 0 ||
                                     (now_ms - this->last_fed_ms_) > kChainColdMs;
-        if (this->chain_prime_remaining_ == 0 && resampler_cold) {
+        if (!this->chain_prime_done_for_reply_ &&
+            this->chain_prime_remaining_ == 0 && resampler_cold) {
           this->chain_prime_remaining_ =
               (size_t) kChainPrimeMs * (kPlaybackSampleRate / 1000) * 2;  // ms→bytes (mono 16-bit)
           ESP_LOGD(TAG, "resampler cold — priming %u bytes of silence before reply",
                    (unsigned) this->chain_prime_remaining_);
+        } else if (!this->chain_prime_done_for_reply_ && !resampler_cold) {
+          // The chain was already warm at reply start. Mark this reply done so
+          // a later network pause cannot retroactively trigger cold priming.
+          this->chain_prime_done_for_reply_ = true;
         }
         if (this->chain_prime_remaining_ > 0) {
           static const uint8_t kSilence[480] = {0};  // 10ms @24k mono16; fed in chunks
@@ -141,6 +146,8 @@ void VaClient::loop() {
           if (fed > 0) {
             this->chain_prime_remaining_ -= fed;
             this->last_fed_ms_ = now_ms;  // count silence as "fed" so cold-check clears
+            if (this->chain_prime_remaining_ == 0)
+              this->chain_prime_done_for_reply_ = true;
           }
           // Hold real-audio drain until the chain is warmed. Real audio stays in
           // PSRAM. Re-enter loop() next tick to continue/finish priming.
@@ -547,7 +554,11 @@ void VaClient::handle_binary_(const uint8_t *data, size_t len) {
   // bridge stalled, network blip, or OpenAI burst late — anything that
   // could starve the downstream chain. Log immediately so the gap is
   // adjacent to whatever the user reports hearing.
-  if (this->last_binary_ms_ != 0) {
+  if (this->last_binary_ms_ == 0) {
+    // First audio packet of a new reply. This is the only point at which the
+    // downstream resampler is allowed to receive a cold-start silence-prime.
+    this->chain_prime_done_for_reply_ = false;
+  } else {
     const uint32_t gap = now_ms - this->last_binary_ms_;
     if (gap > kWsGapWarnMs) {
       this->ws_gap_count_++;

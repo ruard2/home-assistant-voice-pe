@@ -305,6 +305,10 @@ class VaClient : public Component {
   // Bytes of silence still to feed this cold-start (24kHz mono 16-bit). >0 while
   // priming; loop() feeds silence and holds real-audio drain until it reaches 0.
   size_t chain_prime_remaining_{0};
+  // Silence-prime at most once per assistant reply. Network gaps must not be
+  // mistaken for a brand-new cold reply, otherwise every gap gains another
+  // artificial 60 ms silence and becomes audible stutter.
+  bool chain_prime_done_for_reply_{false};
   // millis() of the last time we fed the resampler ANYTHING (silence or real).
   // Used to detect a cold chain: now - last_fed_ms_ > kChainColdMs. 0 = never fed.
   uint32_t last_fed_ms_{0};
