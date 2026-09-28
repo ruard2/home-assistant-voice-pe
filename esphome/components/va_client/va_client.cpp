@@ -494,6 +494,23 @@ void VaClient::handle_text_(const char *data, size_t len) {
     return;
   }
 
+  if (msg.find("\"type\":\"meeting\"") != std::string::npos) {
+    if (msg.find("\"value\":\"start\"") != std::string::npos) {
+      this->meeting_recording_ = true;
+      this->streaming_ = true;
+      this->cancel_timeout("va_no_speech");
+      this->cancel_timeout("va_followup");
+      ESP_LOGI(TAG, "meeting recording mode ON — continuous local stream");
+      this->fire_phase_led_("recording");
+    } else if (msg.find("\"value\":\"stop\"") != std::string::npos) {
+      this->meeting_recording_ = false;
+      this->streaming_ = false;
+      ESP_LOGI(TAG, "meeting recording mode OFF");
+      this->fire_phase_led_("idle");
+    }
+    return;
+  }
+
   // Substring match on `"value":"<phase>"` — keeps us out of a JSON parser
   // until M3 needs richer payloads.
   static const char *const kPhases[] = {"listening", "thinking", "replying", "idle"};
@@ -715,6 +732,17 @@ void VaClient::set_phase_(const std::string &phase) {
   this->current_phase_.store(static_cast<uint8_t>(phase_from_string_(phase)));
   ESP_LOGD(TAG, "Phase -> %s", phase.c_str());
 
+  // Realtime phases caused by the short control exchange must never close the
+  // continuous meeting mic gate or replace its red privacy indicator.
+  if (this->meeting_recording_) {
+    this->streaming_ = true;
+    this->cancel_timeout("va_no_speech");
+    this->cancel_timeout("va_followup");
+    this->cancel_timeout("va_followup_open");
+    this->fire_phase_led_("recording");
+    return;
+  }
+
   // Post-stop `thinking` guard. After a local "stop" the mic gate is closed
   // (send_interrupt set post_stop_guard_), so no new turn can begin until a
   // wake (start_session clears it). A `thinking` arriving here is the server
@@ -795,7 +823,7 @@ void VaClient::set_phase_(const std::string &phase) {
     // of audio → its input watchdog force-ends the turn with no transcript → the
     // turn hangs in thinking. No bot audio plays during thinking, so there's no
     // echo cost to keeping the mic open until the reply genuinely starts.
-    if (phase == "replying" && this->streaming_ && !this->barge_in_) {
+    if (phase == "replying" && this->streaming_ && !this->barge_in_ && !this->meeting_recording_) {
       ESP_LOGI(TAG, "phase=replying — mic streaming off");
       this->streaming_ = false;
     }
@@ -843,7 +871,7 @@ void VaClient::set_phase_(const std::string &phase) {
       // Closing here can't cut a LIVE follow-up window short: the only idle that
       // reaches an open window is exactly such a disconnect — the backend sends
       // no idle while it's waiting for the user to answer.
-      if (this->streaming_) {
+      if (this->streaming_ && !this->meeting_recording_) {
         ESP_LOGI(TAG, "idle while mic open (prev=%s) — closing orphaned mic gate",
                  phase_name_(prev));
         this->streaming_ = false;
@@ -936,6 +964,15 @@ void VaClient::set_phase_(const std::string &phase) {
 }
 
 void VaClient::start_session() {
+  if (this->meeting_recording_) {
+    // The mic is already streaming to the local recorder. The local wake word
+    // merely marks the following utterance as a control command (normally
+    // "stop opname") without interrupting the recording stream.
+    this->send_wake_();
+    this->fire_phase_led_("recording");
+    ESP_LOGI(TAG, "meeting wake — command window opened, recording continues");
+    return;
+  }
   // Open the streaming window. on_mic_data_ will start forwarding frames to
   // the server until "phase":"idle" comes back (response.done). Without this
   // gate, OpenAI Realtime's server VAD would respond to any speech in the
@@ -1024,6 +1061,20 @@ void VaClient::start_session() {
       }
     });
   });
+}
+
+void VaClient::stop_meeting_recording() {
+  if (!this->meeting_recording_)
+    return;
+  if (this->ws_connected_ && this->ws_handle_ != nullptr) {
+    const char msg[] = "{\"type\":\"meeting_stop\"}";
+    auto handle = static_cast<esp_websocket_client_handle_t>(this->ws_handle_);
+    esp_websocket_client_send_text(handle, msg, sizeof(msg) - 1, portMAX_DELAY);
+  }
+  this->meeting_recording_ = false;
+  this->streaming_ = false;
+  this->fire_phase_led_("idle");
+  ESP_LOGI(TAG, "meeting stopped by center button");
 }
 
 void VaClient::open_followup_window_(uint32_t duration_ms) {

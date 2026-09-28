@@ -65,6 +65,8 @@ class VaClient : public Component {
   // YAML-callable actions.
   void start_session();
   void send_interrupt();
+  void stop_meeting_recording();
+  bool is_meeting_recording() const { return meeting_recording_; }
   // Called from yaml's on_followup_opened automation AFTER the chime has
   // finished announcing through the speaker (wait_until !is_announcing +
   // i2s tail). Opens the mic for kRequestFollowUpMs. No-op if the device
@@ -121,6 +123,10 @@ class VaClient : public Component {
   // esp_websocket_client_handle_t kept opaque to avoid leaking esp-idf into the header.
   void *ws_handle_{nullptr};
   bool ws_connected_{false};
+  // Server-controlled privacy-first meeting mode. The mic streams continuously
+  // to the local add-on, which writes it to disk and does not forward ordinary
+  // room audio to OpenAI. A local wake opens a short command path server-side.
+  bool meeting_recording_{false};
 
   uint32_t reconnect_delay_ms_{1000};
   // Set when a reconnect timer is in flight. esp_websocket_client emits both

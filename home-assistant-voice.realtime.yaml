@@ -30,6 +30,8 @@ substitutions:
   voice_assist_thinking_phase_id: '4'
   # The voice assistant is replying to the command
   voice_assist_replying_phase_id: '5'
+  # A privacy-first meeting is being stored locally.
+  voice_assist_recording_phase_id: '6'
   # The voice assistant is not ready
   voice_assist_not_ready_phase_id: '10'
   # The voice assistant encountered an error
@@ -489,32 +491,38 @@ binary_sensor:
                                   # Otherwise: fresh start.
                                   - if:
                                       condition:
-                                        lambda: 'return id(voice_assistant_phase) != ${voice_assist_idle_phase_id};'
+                                        lambda: 'return id(va)->is_meeting_recording();'
                                       then:
-                                        - lambda: 'id(va)->send_interrupt();'
-                                        - speaker.stop:
-                                            id: media_resampling_speaker
-                                        - lambda: id(voice_assistant_phase) = ${voice_assist_idle_phase_id};
-                                        - script.execute: control_leds
+                                        - lambda: 'id(va)->stop_meeting_recording();'
                                       else:
                                         - if:
                                             condition:
-                                              switch.is_off: master_mute_switch
+                                              lambda: 'return id(voice_assistant_phase) != ${voice_assist_idle_phase_id};'
                                             then:
-                                              - script.execute:
-                                                  id: play_sound
-                                                  priority: true
-                                                  sound_file: "center_button_press_sound"
-                                              - wait_until:
-                                                  condition:
-                                                    not:
-                                                      media_player.is_announcing:
-                                                        id: external_media_player
-                                                  timeout: 2s
-                                              - delay: 600ms
-                                              - lambda: 'id(va)->start_session();'
-                                              - lambda: id(voice_assistant_phase) = ${voice_assist_waiting_for_command_phase_id};
+                                              - lambda: 'id(va)->send_interrupt();'
+                                              - speaker.stop:
+                                                  id: media_resampling_speaker
+                                              - lambda: id(voice_assistant_phase) = ${voice_assist_idle_phase_id};
                                               - script.execute: control_leds
+                                            else:
+                                              - if:
+                                                  condition:
+                                                    switch.is_off: master_mute_switch
+                                                  then:
+                                                    - script.execute:
+                                                        id: play_sound
+                                                        priority: true
+                                                        sound_file: "center_button_press_sound"
+                                                    - wait_until:
+                                                        condition:
+                                                          not:
+                                                            media_player.is_announcing:
+                                                              id: external_media_player
+                                                        timeout: 2s
+                                                    - delay: 600ms
+                                                    - lambda: 'id(va)->start_session();'
+                                                    - lambda: id(voice_assistant_phase) = ${voice_assist_waiting_for_command_phase_id};
+                                                    - script.execute: control_leds
       # Double Click
       #  . Exposed as an event entity. To be used in automations inside Home Assistant
       - timing:
@@ -1260,6 +1268,8 @@ script:
             id(control_leds_voice_assistant_thinking_phase).execute();
           } else if (id(voice_assistant_phase) == ${voice_assist_replying_phase_id}) {
             id(control_leds_voice_assistant_replying_phase).execute();
+          } else if (id(voice_assistant_phase) == ${voice_assist_recording_phase_id}) {
+            id(control_leds_meeting_recording).execute();
           } else if (id(voice_assistant_phase) == ${voice_assist_error_phase_id}) {
             id(control_leds_voice_assistant_error_phase).execute();
           } else if (id(voice_assistant_phase) == ${voice_assist_not_ready_phase_id}) {
@@ -1421,6 +1431,17 @@ script:
           brightness: !lambda return max( id(led_ring).current_values.get_brightness() , 0.2f );
           id: voice_assistant_leds
           effect: "Replying"
+
+  # Unmistakable privacy indicator: solid red for the whole local recording.
+  - id: control_leds_meeting_recording
+    then:
+      - light.turn_on:
+          id: voice_assistant_leds
+          brightness: 45%
+          red: 100%
+          green: 0%
+          blue: 0%
+          effect: "none"
 
   # Script executed when the voice assistant is in error
   # Fast Red Pulse
@@ -1953,6 +1974,8 @@ va_client:
           id(voice_assistant_phase) = ${voice_assist_thinking_phase_id};
         } else if (phase == "replying") {
           id(voice_assistant_phase) = ${voice_assist_replying_phase_id};
+        } else if (phase == "recording") {
+          id(voice_assistant_phase) = ${voice_assist_recording_phase_id};
         }
     - script.execute: control_leds
     # va-direct: re-arm the wake word whenever we return to idle. micro_wake_word
