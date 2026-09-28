@@ -1921,7 +1921,7 @@ external_components:
   #   - source: {type: local, path: esphome/components}
   - source:
       type: git
-      url: https://github.com/xandervanerven/home-assistant-voice-pe
+      url: https://github.com/ruard2/home-assistant-voice-pe
       ref: main
     components: [va_client]
     refresh: 0s
