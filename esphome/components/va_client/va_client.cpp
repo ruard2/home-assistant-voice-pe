@@ -163,8 +163,14 @@ void VaClient::loop() {
       if (this->playback_priming_) {
         const size_t target =
             (size_t) this->playback_prebuffer_ms_ * (kPlaybackSampleRate / 1000) * 2;
+        // Do not use the requested buffer duration as the deadline as well.
+        // With bursty Realtime delivery that caused us to start after 1000 ms
+        // with only ~560 ms of PCM queued, immediately underrun, and stutter.
+        // Prefer the actual byte target; the generous cap only prevents a
+        // permanently wedged stream from waiting forever.
+        const uint32_t max_wait_ms = std::max<uint32_t>(6000, this->playback_prebuffer_ms_ * 4);
         if (fill >= target ||
-            (millis() - this->prime_started_ms_) >= this->playback_prebuffer_ms_) {
+            (millis() - this->prime_started_ms_) >= max_wait_ms) {
           this->playback_priming_ = false;
           ESP_LOGD(TAG, "prebuffer ready (%u bytes) — playback start", (unsigned) fill);
         } else {
@@ -687,9 +693,11 @@ void VaClient::on_mic_data_(const std::vector<uint8_t> &samples) {
   // 200-450 ms incoming-audio gaps and badly stuttering/noisy replies. There is
   // no reason to upload the mic during REPLYING when barge-in is off. Meeting
   // recording is the exception: its continuous local capture must keep flowing.
-  if (static_cast<Phase>(this->current_phase_.load()) == Phase::REPLYING &&
-      !this->barge_in_ && !this->meeting_recording_)
+  const Phase mic_phase = static_cast<Phase>(this->current_phase_.load());
+  if ((mic_phase == Phase::THINKING || mic_phase == Phase::REPLYING) &&
+      !this->barge_in_ && !this->meeting_recording_) {
     return;
+  }
 
   auto handle = static_cast<esp_websocket_client_handle_t>(this->ws_handle_);
 
