@@ -968,6 +968,10 @@ void VaClient::start_session() {
     // The mic is already streaming to the local recorder. The local wake word
     // merely marks the following utterance as a control command (normally
     // "stop opname") without interrupting the recording stream.
+    // A generic interrupt (including the old local Stop-model conflict) may
+    // have closed streaming_ without ending the meeting. Re-open it here so
+    // the recovery command can always reach the backend.
+    this->streaming_ = true;
     this->send_wake_();
     this->fire_phase_led_("recording");
     ESP_LOGI(TAG, "meeting wake — command window opened, recording continues");
