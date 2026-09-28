@@ -2013,6 +2013,16 @@ va_client:
           # quiet follow-up/idle window below. (See the stop model comment.)
           - lambda: 'id(stop).set_probability_cutoff(128);'
           - script.stop: followup_window_watchdog
+    # During a meeting, "stop" is part of the deliberate command
+    # "stop opname". The generic local Stop wake model would otherwise fire
+    # first, clear that command from OpenAI's input buffer and leave the local
+    # recorder running. Only Okay Nabu remains active in recording mode.
+    - if:
+        condition:
+          lambda: 'return phase == "recording";'
+        then:
+          - micro_wake_word.disable_model: stop
+          - script.stop: followup_window_watchdog
     # A turn is in flight ("listening" = the server VAD heard the user speak,
     # OR the follow-up window just opened its listening LED): stop the disarm
     # watchdog that the preceding idle started. Without this it fires 12 s
@@ -2032,7 +2042,7 @@ va_client:
           - script.stop: followup_window_watchdog
     - if:
         condition:
-          lambda: 'return phase == "idle";'
+          lambda: 'return phase == "idle" && !id(va)->is_meeting_recording();'
         then:
           - micro_wake_word.enable_model: stop
           # B3: quiet at rest (no TTS) → restore the sensitive 0.40 (102) so weak
