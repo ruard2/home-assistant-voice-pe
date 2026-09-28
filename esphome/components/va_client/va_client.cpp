@@ -508,6 +508,12 @@ void VaClient::handle_text_(const char *data, size_t len) {
       ESP_LOGI(TAG, "meeting recording mode OFF");
       this->fire_phase_led_("idle");
     }
+    if (msg.find("\"meeting_active\":true") != std::string::npos) {
+      this->meeting_recording_ = true;
+      this->streaming_ = true;
+      this->fire_phase_led_("recording");
+      ESP_LOGI(TAG, "hello: restored active meeting recording after reconnect");
+    }
     return;
   }
 
