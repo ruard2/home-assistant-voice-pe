@@ -2262,7 +2262,10 @@ micro_wake_word:
                             # explicitly here. start_session() is idempotent
                             # against the send_interrupt() above.
                             - lambda: 'id(va)->start_session();'
-                            - lambda: id(voice_assistant_phase) = ${voice_assist_listening_for_command_phase_id};
+                            - lambda: |-
+                                id(voice_assistant_phase) = id(va)->is_meeting_recording()
+                                  ? ${voice_assist_recording_phase_id}
+                                  : ${voice_assist_listening_for_command_phase_id};
                             - script.execute: control_leds
                           else:
                             # Backend down? Don't pretend to listen. Without
@@ -2324,7 +2327,10 @@ micro_wake_word:
                                   # before the server VAD detects actual speech. va_client's
                                   # on_phase will overwrite to phase 3 (listening_for_command)
                                   # once the server reports speech started.
-                                  - lambda: id(voice_assistant_phase) = ${voice_assist_waiting_for_command_phase_id};
+                                  - lambda: |-
+                                      id(voice_assistant_phase) = id(va)->is_meeting_recording()
+                                        ? ${voice_assist_recording_phase_id}
+                                        : ${voice_assist_waiting_for_command_phase_id};
                                   - script.execute: control_leds
 
 select:
